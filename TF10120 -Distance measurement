@@ -24,7 +24,7 @@ uint16_t readTOF10120() {
   Wire.beginTransmission(TOF10120_ADDRESS);
   Wire.write(0x00); // Register to read from
   Wire.endTransmission();
-  Wire.requestFrom(TOF10120_ADDRESS, 2);
+  Wire.requesrom(TOF10120_ADDRESS, 2);
   if (Wire.available() == 2) {
     uint16_t distance = Wire.read();
     distance = distance << 8;
