@@ -1,0 +1,239 @@
+/* IRremoteESP8266: IRsendDemo - demonstrates sending IR codes with IRsend.
+ *
+ * Version 1.1 January, 2019
+ * Based on Ken Shirriff's IrsendDemo Version 0.1 July, 2009,
+ * Copyright 2009 Ken Shirriff, http://arcfn.com
+ *
+ * An IR LED circuit *MUST* be connected to the ESP8266 on a pin
+ * as specified by kIrLed below.
+ *
+ * TL;DR: The IR LED needs to be driven by a transistor for a good result.
+ *
+ * Suggested circuit:
+ *     https://github.com/crankyoldgit/IRremoteESP8266/wiki#ir-sending
+ *
+ * Common mistakes & tips:
+ *   * Don't just connect the IR LED directly to the pin, it won't
+ *     have enough current to drive the IR LED effectively.
+ *   * Make sure you have the IR LED polarity correct.
+ *     See: https://learn.sparkfun.com/tutorials/polarity/diode-and-led-polarity
+ *   * Typical digital camera/phones can be used to see if the IR LED is flashed.
+ *     Replace the IR LED with a normal LED if you don't have a digital camera
+ *     when debugging.
+ *   * Avoid using the following pins unless you really know what you are doing:
+ *     * Pin 0/D3: Can interfere with the boot/program mode & support circuits.
+ *     * Pin 1/TX/TXD0: Any serial transmissions from the ESP8266 will interfere.
+ *     * Pin 3/RX/RXD0: Any serial transmissions to the ESP8266 will interfere.
+ *   * ESP-01 modules are tricky. We suggest you use a module with more GPIOs
+ *     for your first time. e.g. ESP-12 etc.
+ */
+
+#include <Arduino.h>
+#include <IRremoteESP8266.h>
+#include <IRsend.h>
+#include <DHT11.h>
+#include <DHT_U.h>
+#include <DHT.h>
+#include <ESP8266WiFi.h> 
+//#include "time.h"
+
+//#include <DateTime.h>
+//#include <DateTimeStrings.h>
+
+//#include <ESPDateTime.h>
+
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
+//const char* ntpServer = "pool.ntp.org";
+//const long  gmtOffset_sec = 19800;
+//const int   daylightOffset_sec = 0;
+
+//Your Domain name with URL path or IP address with path
+const char* serverName = "http://172.25.10.175:3000/data";
+
+// the following variables are unsigned longs because the time, measured in
+// milliseconds, will quickly become a bigger number than can be stored in an int.
+unsigned long lastTime = 0;
+// Timer set to 10 minutes (600000)
+//unsigned long timerDelay = 600000;
+// Set timer to 5 seconds (5000)
+unsigned long timerDelay = 5000;
+
+String myDateTime="";
+
+
+const char* ssid     = "KnowledgeQ";         // The SSID (name) of the Wi-Fi network you want to connect to
+const char* password = "kqnet!@#";     // The password of the Wi-Fi network
+
+//Constants
+#define DHTPIN 14     // what pin we're connected to
+#define DHTTYPE DHT11   // DHT 11  (AM2302)
+// Initialize DHT sensor for normal 16mhz Arduino
+DHT dht(DHTPIN, DHTTYPE);
+
+const uint16_t kIrLed = 4;  // ESP8266 GPIO pin to use. Recommended: 4 (D2).
+
+IRsend irsend(kIrLed);  // Set the GPIO to be used to sending the message.
+const float turnOnThreshold = 26.0; // Temperature to turn on the AC
+const float turnOffThreshold = 24.0; // Temperature to turn off the AC
+bool acState = false; // Track the state of the AC (true = ON, false = OFF)
+
+int chk;
+float hum;  //Stores humidity value
+float temp; //Stores temperature value
+
+// Example of data captured by IRrecvDumpV2.ino
+uint16_t rawData_on[439] = {3444, 1756,  470, 424,  472, 1238,  504, 426,  446, 448,  444, 452,  446, 450,  442, 452,  446, 450,  470, 424,  418,
+                         476,  446, 450,  444, 452,  418, 482,  440, 1272,  470, 450,  500, 394,  446, 450,  446, 424,  470, 452,  444, 452,  442, 450,  472, 1244,  498,
+                         1274,  442, 1300,  446, 450,  420, 478,  418, 1324,  444, 452,  448, 448,  446, 450,  446, 450,  444, 452,  444, 450,  418, 476,  444, 452,
+                         472, 422,  444, 450,  446, 452,  444, 448,  472, 424,  470, 426,  444, 452,  444, 450,  444, 452,  444, 450,  444, 450,  444, 452,  446, 450,
+                         418, 478,  444, 450,  444, 450,  470, 424,  444, 452,  444, 450,  418, 478,  444, 452,  418, 480,  416, 1324,  446, 1298,  446, 450,  418, 476,
+                         446, 448,  472, 424,  470, 424,  470, 9996,  3444, 1754,  470, 426,  444, 1298,  418, 476,  444, 452,  418, 476,  446, 452,  470, 426,  444,
+                         452,  470, 422,  446, 450,  444, 448,  446, 452,  444, 452,  442, 1298,  444, 452,  446, 448,  444, 452,  470, 424,  444, 452,  442, 452,  444,
+                         450,  474, 1270,  446, 1300,  470, 1274,  470, 424,  472, 422,  472, 1246,  496, 426,  446, 450,  470, 424,  444, 452,  418, 476,  418, 478,
+                         470, 426,  444, 450,  444, 452,  442, 450,  446, 450,  442, 452,  472, 426,  444, 1298,  442, 452,  446, 448,  446, 1296,  446, 450,  444, 452,
+                         470, 424,  444, 452,  442, 452,  442, 452,  444, 450,  472, 424,  444, 1298,  472, 1248,  468, 452,  442, 454,  442, 452,  444, 452,  472, 422,
+                         446, 450,  444, 452,  444, 450,  444, 452,  416, 1324,  472, 1272,  472, 1272,  442, 1300,  442, 1300,  470, 426,  444, 1298,  444, 450,  470,
+                         1272,  444, 1298,  444, 452,  470, 1272,  446, 1296,  444, 452,  442, 452,  444, 450,  442, 452,  446, 448,  470, 426,  444, 450,  470, 426,
+                         442, 452,  444, 452,  442, 450,  444, 452,  470, 424,  444, 1298,  468, 1274,  444, 1298,  444, 454,  442, 450,  442, 452,  442, 450,  418,
+                         480,  416, 478,  444, 450,  444, 454,  440, 452,  442, 1300,  470, 1272,  468, 1274,  442, 454,  442, 452,  442, 452,  442, 452,  470, 426,
+                         442, 452,  416, 478,  444, 452,  444, 452,  442, 452,  416, 478,  446, 450,  442, 452,  444, 450,  442, 452,  444, 452,  444, 1300,  470, 426,
+                         444, 452,  444, 1300,  440, 452,  470, 424,  446, 450,  444, 1298,  444, 452,  444, 452,  442, 452,  444, 450,  468, 426,  470, 424,  444, 452,
+                         442, 452,  444, 452,  468, 426,  444, 452,  442, 452,  444, 452,  444, 452,  444, 452,  468, 426,  442, 454,  442, 1302,  470, 426,  470, 426,
+                         442, 1300,  444, 1298,  444, 1300,  470, 1274,  442};
+
+
+uint16_t rawData_off[439] = {3470, 1754,  446, 448,  446, 1298,  444, 476,  418, 448,  448, 446,  448, 450,  498, 396,  448, 448,
+                          474,  424, 470,   424, 498, 396, 472,  422, 472, 450,  446, 1270,  474, 422,  472, 424,  470, 422,  472, 422,  446, 454,  414, 476,  420, 476,
+                          498,  1244,  446, 1268,  502, 1242,  500, 424,  444, 450,  472, 1270,  444, 450,  446, 448,  498, 398,  418, 476,  416, 478,  444, 450,  416,
+                          478,  418, 478,  418, 476,  416, 450,  446, 452,  440, 478,  418, 478,  418, 476,  418, 476,  418, 454,  440, 478,  418, 476,  418, 476,  494,
+                          402,  416, 478,  416, 478,  418, 476,  420, 476,  418, 478,  418, 476,  418, 476,  418, 480,  414, 478,  418, 478,  416, 1298,  444, 1324,  418,
+                          476,  444, 450,  446, 448,  498, 396,  420, 478,  496, 9928,  3474, 1730,  496, 422,  474, 1266,  500, 396,  474, 424,  446, 448,  472, 422,
+                          500, 394,  474, 422,  498, 396,  448, 448,  474, 422,  472, 422,  500, 396,  474, 1266,  498, 396,  476, 420,  474, 422,  500, 394,  500, 396,
+                          474, 420,  474, 420,  472, 1268,  476, 1268,  500, 1242,  472, 422,  474, 420,  476, 1266,  474, 420,  476, 418,  476, 420,  500, 394,  474,
+                          420,  498, 396,  472, 422,  474, 420,  500, 396,  498, 396,  472, 424,  472, 422,  474, 422,  500, 394,  498, 398,  472, 422,  472, 1244,  498,
+                          424,  470, 424,  472, 422,  474, 394,  500, 422,  500, 394,  498, 398,  472, 422,  472, 1268,  500, 1244,  498, 394,  474, 424,  470, 424,  472,
+                          420,  472, 426,  470, 422,  472, 422,  474, 422,  472, 422,  472, 1244,  496, 1270,  472, 1272,  472, 1270,  496, 1244,  474, 424,  472, 1270,
+                          474, 424,  470, 1272,  472, 1270,  472, 422,  498, 1218,  498, 1272,  472, 422,  472, 422,  472, 424,  496, 398,  472, 422,  472, 422,  472,
+                          422,  498, 398,  472, 424,  444, 452,  472, 424,  470, 422,  446, 450,  498, 1242,  472, 1270,  472, 1270,  470, 424,  472, 422,  470, 424,
+                          472, 422,  472, 424,  470, 426,  444, 450,  472, 422,  446, 450,  472, 1270,  498, 1244,  474, 1268,  444, 452,  444, 450,  496, 398,  470,
+                          424,  498, 396,  472, 398,  470, 450,  472, 424,  468, 424,  498, 398,  472, 422,  472, 424,  470, 424,  444, 450,  472, 424,  494, 398,  472,
+                          1270,  472, 422,  470, 424,  470, 1270,  470, 424,  444, 452,  468, 426,  442, 1272,  470, 452,  470, 424,  444, 448,  474, 422,  472, 422,
+                          470, 426,  470, 424,  472, 424,  444, 450,  470, 424,  470, 424,  500, 396,  444, 450,  470, 424,  472, 424,  444, 450,  496, 1246,  470, 424,
+                          472, 422,  470, 426,  472, 1270,  446, 1296,  472, 1270,  444, 1298,  472};
+void setup() {
+  irsend.begin();
+  dht.begin();
+  Serial.print("Connecting to ");
+  WiFi.begin(ssid, password);             // Connect to the network
+  Serial.print(ssid); Serial.println(" ...");
+
+    // Init and get the time
+  //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  //printLocalTime();
+
+
+  int i = 0;
+  while (WiFi.status() != WL_CONNECTED) { // Wait for the Wi-Fi to connect
+    delay(1000);
+    Serial.print(++i); Serial.print(' ');
+  }
+
+  Serial.println('\n');
+  Serial.println("Connection established!");  
+  Serial.print("IP address:\t");
+  Serial.println(WiFi.localIP());         // Send the IP address of the ESP8266 to the computer
+
+#if ESP8266
+  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+#else  // ESP8266
+  Serial.begin(115200, SERIAL_8N1);
+#endif  // ESP8266
+  
+}
+
+
+void loop() {
+  temp= dht.readTemperature();
+
+ // Serial.println(" Temp : "+String(temp)+"  acState: "+String(acState));
+  //printLocalTime();
+if (temp > turnOnThreshold && !acState) {
+    irsend.sendRaw(rawData_on, 439, 38);  // Send a raw data capture at 38kHz.
+    acState = true;
+    irsend.sendRaw(rawData_on, 439, 38);
+    Serial.println("AC is ON");
+  } else if (temp < turnOffThreshold && acState) {
+    irsend.sendRaw(rawData_off, 439, 38);  // Send a raw data capture at 38kHz.
+    acState = false;
+    Serial.println("AC is OFF");
+  }
+
+ //Send an HTTP POST request every 10 minutes
+  if ((millis() - lastTime) > timerDelay) {
+    //Check WiFi connection status
+    if(WiFi.status()== WL_CONNECTED){
+      WiFiClient client;
+      HTTPClient http;
+      
+      // Your Domain name with URL path or IP address with path
+      http.begin(client, serverName);
+  
+      // If you need Node-RED/server authentication, insert user and password below
+      //http.setAuthorization("REPLACE_WITH_SERVER_USERNAME", "REPLACE_WITH_SERVER_PASSWORD");
+  
+      // Specify content-type header
+      http.addHeader("Content-Type", "application/json");
+      // Data to send with HTTP POST
+      
+      String httpRequestData = "{\"api_key\":\"4a82fa1323de0728abed0429bbf8b293\",\"deviceID\":\"ESP8266-01\",\"data\":\""+String(temp)+"\"}";           
+      // Send HTTP POST request
+      int httpResponseCode = http.POST(httpRequestData);
+      
+      // If you need an HTTP request with a content type: application/json, use the following:
+      //http.addHeader("Content-Type", "application/json");
+      //int httpResponseCode = http.POST("{\"api_key\":\"tPmAT5Ab3j7F9\",\"sensor\":\"BME280\",\"value1\":\"24.25\",\"value2\":\"49.54\",\"value3\":\"1005.14\"}");
+
+      // If you need an HTTP request with a content type: text/plain
+      //http.addHeader("Content-Type", "text/plain");
+      //int httpResponseCode = http.POST("Hello, World!");
+    
+      Serial.print("HTTP Response code: ");
+      Serial.println(httpResponseCode);
+      Serial.print(" ");
+        
+      // Free resources
+      http.end();
+    }
+    else {
+      Serial.println("WiFi Disconnected");
+    }
+    lastTime = millis();
+  }
+
+}
+
+/*
+void printLocalTime(){
+  struct tm timeinfo;
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  char myDay[3];
+  char myMonth[4];
+  char myYear[5];
+  char timeHour[3];
+  char timeMin[3];
+  char timeSeconds[3];
+
+ strftime(myDay,3, "%d", &timeinfo);
+ strftime(myMonth,4, "%B", &timeinfo);
+ strftime(myYear,5, "%Y", &timeinfo);
+ strftime(timeHour,3, "%H", &timeinfo);
+ strftime(timeMin,3, "%M", &timeinfo);
+ strftime(timeSeconds,3, "%S", &timeinfo);
+  myDateTime = String(myDay)+"-"+String(myMonth)+"-"+String(myYear)+" "+String(timeHour)+":"+String(timeMin)+":"+String(timeSeconds);
+}
+*/
