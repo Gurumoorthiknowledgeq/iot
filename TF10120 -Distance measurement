@@ -19,7 +19,6 @@ void loop() {
   Serial.println(" mm");
   delay(2000); // Delay for 2 seconds
 }
-// test
 
 uint16_t readTOF10120() {
   Wire.beginTransmission(TOF10120_ADDRESS);
